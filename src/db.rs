@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use crate::insert::InsertStatement;
 
 pub const USERNAME_MAX: usize = 32;
@@ -35,6 +33,7 @@ pub struct SerializedRow {
 
 // An in-memory, deserialized row with typed fields
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Row {
     id: u32,
     username: String,
@@ -46,28 +45,23 @@ impl SerializedRow {
     // [0..4]               -> id (little-endian u32)
     // [4..4+USERNAME_MAX]  -> username, zero-padded
     // [4+USERNAME_MAX..]   -> email, zero-padded
-
-    fn serialize(data: InsertStatement) -> Result<SerializedRow, String> {
+    fn serialize(data: &InsertStatement) -> SerializedRow {
         let mut buf = Vec::with_capacity(SERIALIZED_SIZE);
 
-        buf.write_all(&data.id.to_le_bytes());
+        buf.extend_from_slice(&data.id.to_le_bytes());
 
-        let username_bytes = data.username.as_bytes();
-        buf.write_all(username_bytes);
+        buf.extend_from_slice(data.username.as_bytes());
         buf.resize(4 + USERNAME_MAX, 0);
 
-        let email_bytes = data.email.as_bytes();
-        buf.write_all(email_bytes);
+        buf.extend_from_slice(data.email.as_bytes());
         buf.resize(SERIALIZED_SIZE, 0);
 
-        let row = SerializedRow { byte_arr: buf };
-
-        return Ok(row);
+        SerializedRow { byte_arr: buf }
     }
 
     fn deserialize(bytes: &[u8]) -> Result<Row, String> {
         if bytes.len() < SERIALIZED_SIZE {
-            return Err(format!("Not enough bytes to deserialize row"));
+            return Err("Not enough bytes to deserialize row".to_string());
         }
 
         // first 4 bytes are the row id
@@ -107,14 +101,14 @@ impl Page {
     }
 
     /// Copy a serialized row into the next available slot in this page's buffer
-    fn append_row(&mut self, row: SerializedRow) -> Result<(), String> {
+    fn append_row(&mut self, row: &SerializedRow) -> Result<(), String> {
         if self.num_rows >= ROWS_PER_PAGE {
             return Err("page full, need new page".to_string());
         }
         let offset = SERIALIZED_SIZE * self.num_rows;
         self.data[offset..offset + SERIALIZED_SIZE].copy_from_slice(&row.byte_arr);
 
-        self.num_rows = self.num_rows + 1;
+        self.num_rows += 1;
 
         Ok(())
     }
@@ -122,7 +116,7 @@ impl Page {
     /// Deserialize and return the row at the given intra-page slot index
     fn read_row(&self, row_offset: usize) -> Result<Row, String> {
         if row_offset >= ROWS_PER_PAGE {
-            return Err(format!("Row {} out of bounds", row_offset));
+            return Err(format!("Row {row_offset} out of bounds"));
         }
         let offset = row_offset * SERIALIZED_SIZE;
         SerializedRow::deserialize(&self.data[offset..offset + SERIALIZED_SIZE])
@@ -142,8 +136,8 @@ impl Table {
     }
 
     // Serialize data and append it to the last page, allocating a new page if needed
-    pub fn insert(&mut self, data: InsertStatement) -> Result<(), String> {
-        let serialized = SerializedRow::serialize(data)?;
+    pub fn insert(&mut self, data: &InsertStatement) -> Result<(), String> {
+        let serialized = SerializedRow::serialize(data);
         if self.num_pages == 0 {
             self.pages.push(Page::new());
             self.num_pages += 1;
@@ -152,7 +146,7 @@ impl Table {
             self.pages.push(Page::new());
             self.num_pages += 1;
         }
-        self.pages[self.num_pages - 1].append_row(serialized)?;
+        self.pages[self.num_pages - 1].append_row(&serialized)?;
 
         Ok(())
     }
@@ -160,9 +154,62 @@ impl Table {
     //
     pub fn select(&self) {
         for pg in &self.pages {
-            for i in 0..pg.data.len() {
+            for i in 0..pg.num_rows {
                 println!("{:?}", pg.read_row(i).unwrap());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::insert::InsertStatement;
+
+    fn make_insert(id: u32, username: &str, email: &str) -> InsertStatement {
+        InsertStatement {
+            id,
+            username: username.to_string(),
+            email: email.to_string(),
+        }
+    }
+
+    #[test]
+    fn serialize_deserialize_roundtrip() {
+        let row = SerializedRow::serialize(make_insert(1, "daniel", "d@example.com")).unwrap();
+        let deserialized = SerializedRow::deserialize(&row.byte_arr).unwrap();
+        assert_eq!(deserialized.id, 1);
+        assert_eq!(deserialized.username, "daniel");
+        assert_eq!(deserialized.email, "d@example.com");
+    }
+
+    #[test]
+    fn roundtrip_max_length_fields() {
+        let username = "a".repeat(USERNAME_MAX);
+        let email = "b".repeat(EMAIL_MAX);
+        let row = SerializedRow::serialize(make_insert(42, &username, &email)).unwrap();
+        let deserialized = SerializedRow::deserialize(&row.byte_arr).unwrap();
+        assert_eq!(deserialized.username, username);
+        assert_eq!(deserialized.email, email);
+    }
+
+    #[test]
+    fn page_fills_and_errors() {
+        let mut page = Page::new();
+        for i in 0..ROWS_PER_PAGE {
+            let row = SerializedRow::serialize(make_insert(i as u32, "u", "e@e.com")).unwrap();
+            assert!(page.append_row(row).is_ok());
+        }
+        let row = SerializedRow::serialize(make_insert(999, "u", "e@e.com")).unwrap();
+        assert!(page.append_row(row).is_err());
+    }
+
+    #[test]
+    fn table_triggers_new_page_when_full() {
+        let mut table = Table::new();
+        for i in 0..ROWS_PER_PAGE + 1 {
+            table.insert(make_insert(i as u32, "u", "e@e.com")).unwrap();
+        }
+        assert_eq!(table.num_pages, 2);
     }
 }

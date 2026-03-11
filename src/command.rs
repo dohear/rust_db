@@ -27,7 +27,7 @@ impl MetaCommand {
     pub fn parse(input: &[String]) -> Self {
         match input[0].as_str() {
             ".exit" => MetaCommand::Exit,
-            _ => MetaCommand::Unrecognized(input[0].to_string()),
+            _ => MetaCommand::Unrecognized(input[0].clone()),
         }
     }
 }
@@ -37,7 +37,7 @@ impl Statement {
         match input[0].as_str() {
             "insert" => Statement::Insert,
             "select" => Statement::Select,
-            _ => Statement::Unrecognized(input[0].to_string()),
+            _ => Statement::Unrecognized(input[0].clone()),
         }
     }
 }

@@ -35,20 +35,20 @@ fn main() {
                     std::process::exit(0);
                 }
                 MetaCommand::Unrecognized(cmd) => {
-                    println!("Unrecognized command '{}'.", cmd);
+                    println!("Unrecognized command '{cmd}'.",);
                 }
             },
             // Otherwise we parse the input as such: Command->Statement->{statement type}...
             Command::Statement(stmt) => match stmt {
                 Statement::Insert => {
-                    match InsertStatement::new(&input_buffer.buffer).and_then(|s| db.insert(s)) {
-                        Ok(inserted) => println!("Successfully inserted '{:?}'.", inserted),
-                        Err(e) => println!("{}", e),
+                    match InsertStatement::new(&input_buffer.buffer).and_then(|s| db.insert(&s)) {
+                        Ok(inserted) => println!("Successfully inserted '{inserted:?}'."),
+                        Err(e) => println!("{e}"),
                     }
                 }
                 Statement::Select => db.select(),
                 Statement::Unrecognized(cmd) => {
-                    println!("Unrecognized command '{:?}'.", cmd);
+                    println!("Unrecognized command '{cmd:?}'.");
                 }
             },
         }

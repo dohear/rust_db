@@ -1,7 +1,7 @@
 use std::io::{self};
 
 // the InputBuffer is used to store tokenized user Input
-// as such, stores only one input at a time
+// as such, stores only one input at a time--
 // clearing itself at the start of a new read
 pub struct InputBuffer {
     pub buffer: Vec<String>,
